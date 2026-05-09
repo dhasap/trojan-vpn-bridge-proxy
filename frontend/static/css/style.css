@@ -507,3 +507,20 @@ body {
 .proxy-box:hover .ch {
     color: var(--accent);
 }
+
+/* Proxy Test URL */
+.proxy-test-url {
+    margin-top: 0.5rem;
+    padding: 0.8rem;
+    background: var(--input);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.proxy-test-url strong {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+}

@@ -479,9 +479,17 @@ def test_proxy(proxy_id: int) -> dict:
     start_time = time.time()
     
     try:
-        # Use container name for Docker network access
+        # Use container name with auth for Docker network access
+        proxy_user = proxy["proxy_user"] or "proxy"
+        proxy_pass = proxy["proxy_pass"] or ""
+        
+        if proxy_pass:
+            proxy_url = f"socks5h://{proxy_user}:{proxy_pass}@{container_name}:1080"
+        else:
+            proxy_url = f"socks5h://{container_name}:1080"
+        
         result = subprocess.run([
-            "curl", "-x", f"socks5h://{container_name}:1080",
+            "curl", "-x", proxy_url,
             "https://httpbin.org/ip", "--max-time", "10", "-s"
         ], capture_output=True, text=True, timeout=15)
         
@@ -779,6 +787,10 @@ async def register_page(request: Request):
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
+
+@app.get("/proxy-test", response_class=HTMLResponse)
+async def proxy_test_page(request: Request):
+    return templates.TemplateResponse("proxy-test.html", {"request": request})
 
 # ─── Startup ──────────────────────────────────────────────
 

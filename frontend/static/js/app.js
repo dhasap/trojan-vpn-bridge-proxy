@@ -105,6 +105,18 @@ function renderProxies() {
                         Last test: IP ${p.last_test_ip} | Ping ${p.last_test_ping}ms
                     </div>
                 ` : ''}
+                ${p.status === 'RUNNING' && p.proxy_user && p.proxy_pass ? `
+                    <div class="proxy-test-url">
+                        <strong>Test in Browser:</strong>
+                        <div class="proxy-box" onclick="window.open('/proxy-test?host=${VPS_IP}&port=${p.local_port}&user=${p.proxy_user}&pass=${p.proxy_pass}', '_blank')">
+                            <span>Open Proxy Test Page</span>
+                        </div>
+                        <div style="margin-top:0.3rem;font-size:0.75rem;color:var(--muted)">
+                            Set SOCKS5 proxy in browser: ${VPS_IP}:${p.local_port}<br>
+                            User: ${p.proxy_user} | Pass: ${p.proxy_pass}
+                        </div>
+                    </div>
+                ` : ''}
             </div>
             <div class="proxy-actions">
                 ${p.status === 'STOPPED' || p.status === 'PAUSED' ? `
