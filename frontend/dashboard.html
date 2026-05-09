@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Trojan Proxy Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">Trojan Proxy Panel</div>
+        <div class="nav-links">
+            <a href="#" onclick="showSection('proxies')" class="active" id="nav-proxies">Proxies</a>
+            <a href="#" onclick="showSection('add')" id="nav-add">Add Proxy</a>
+            <a href="#" onclick="logout()" class="btn-logout">Logout</a>
+        </div>
+    </nav>
+
+    <div class="main">
+        <!-- Stats -->
+        <div class="stats-row" id="statsRow">
+            <div class="stat-card">
+                <div class="stat-value" id="statProxies">0</div>
+                <div class="stat-label">Total Proxies</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statRunning">0</div>
+                <div class="stat-label">Running</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statIP">-</div>
+                <div class="stat-label">VPS IP</div>
+            </div>
+        </div>
+
+        <!-- Proxies Section -->
+        <div id="section-proxies" class="section">
+            <div class="section-header">
+                <h2>My Proxies</h2>
+                <button class="btn btn-primary" onclick="showSection('add')">+ Add Proxy</button>
+            </div>
+            <div id="proxyList" class="proxy-list">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Add Proxy Section -->
+        <div id="section-add" class="section" style="display:none">
+            <h2>Add New Proxy</h2>
+            
+            <div class="tabs">
+                <button class="tab active" onclick="showTab('url')">Paste URL</button>
+                <button class="tab" onclick="showTab('manual')">Manual Input</button>
+            </div>
+
+            <!-- URL Tab -->
+            <div id="tab-url" class="tab-content">
+                <div class="form-group">
+                    <label>Trojan URL</label>
+                    <input type="text" id="trojanUrl" placeholder="trojan://password@host:port/?sni=xxx&type=ws&host=xxx&path=/howdy">
+                </div>
+                <div class="form-group">
+                    <label>Name (optional)</label>
+                    <input type="text" id="urlName" placeholder="My Proxy">
+                </div>
+                <button class="btn btn-primary" onclick="addFromUrl()">Add Proxy</button>
+            </div>
+
+            <!-- Manual Tab -->
+            <div id="tab-manual" class="tab-content" style="display:none">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="text" id="manualPassword" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Host</label>
+                        <input type="text" id="manualHost" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Port</label>
+                        <input type="number" id="manualPort" value="443">
+                    </div>
+                    <div class="form-group">
+                        <label>SNI</label>
+                        <input type="text" id="manualSni" placeholder="Same as host">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Network</label>
+                        <select id="manualNetwork">
+                            <option value="ws">WebSocket</option>
+                            <option value="tcp">TCP</option>
+                            <option value="grpc">gRPC</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>WS Path</label>
+                        <input type="text" id="manualPath" value="/">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Name (optional)</label>
+                    <input type="text" id="manualName" placeholder="My Proxy">
+                </div>
+                <button class="btn btn-primary" onclick="addManual()">Add Proxy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

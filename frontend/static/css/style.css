@@ -1,0 +1,509 @@
+:root {
+    --bg: #0a0a1a;
+    --card: #12122a;
+    --border: #1e1e3a;
+    --accent: #00d4ff;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --warn: #f59e0b;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --input: #0f0f23;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+}
+
+.container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 2rem;
+}
+
+.hero {
+    text-align: center;
+    max-width: 500px;
+}
+
+.hero .logo {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+}
+
+.hero h1 {
+    font-size: 2rem;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+}
+
+.hero p {
+    color: var(--muted);
+    margin-bottom: 2rem;
+}
+
+.buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #000;
+}
+
+.btn-primary:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: white;
+}
+
+.btn-success {
+    background: var(--success);
+    color: white;
+}
+
+.btn-warn {
+    background: var(--warn);
+    color: #000;
+}
+
+.btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+}
+
+.btn-full {
+    width: 100%;
+}
+
+.form-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    width: 100%;
+    max-width: 400px;
+}
+
+.logo-small {
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+.form-box h2 {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    color: var(--accent);
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 0.4rem;
+    text-transform: uppercase;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.error {
+    background: var(--danger);
+    color: white;
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+}
+
+.text-center {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.text-center a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+/* Navbar */
+.navbar {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-brand {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent);
+}
+
+.nav-links {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+}
+
+.nav-links a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.nav-links a:hover,
+.nav-links a.active {
+    color: var(--accent);
+}
+
+.btn-logout {
+    color: var(--danger) !important;
+}
+
+/* Main */
+.main {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 2rem;
+}
+
+/* Stats */
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.2rem;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-top: 0.3rem;
+}
+
+/* Sections */
+.section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.1rem;
+}
+
+/* Proxy List */
+.proxy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.proxy-card {
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.proxy-info {
+    flex: 1;
+}
+
+.proxy-name {
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+}
+
+.proxy-details {
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+.proxy-status {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+}
+
+.status-RUNNING {
+    background: var(--success);
+    color: white;
+}
+
+.status-STOPPED,
+.status-PAUSED {
+    background: var(--muted);
+    color: white;
+}
+
+.status-ERROR {
+    background: var(--danger);
+    color: white;
+}
+
+.proxy-port {
+    font-family: monospace;
+    color: var(--accent);
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+}
+
+.proxy-test {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 0.3rem;
+}
+
+.proxy-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.tab {
+    padding: 0.6rem 1.2rem;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.tab.active {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+}
+
+.tab-content {
+    padding: 1rem 0;
+}
+
+/* Toast */
+.toast {
+    position: fixed;
+    top: 2rem;
+    right: 2rem;
+    padding: 0.8rem 1.2rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    z-index: 9999;
+    display: none;
+}
+
+.toast.success {
+    background: var(--success);
+    color: white;
+    display: block;
+}
+
+.toast.error {
+    background: var(--danger);
+    color: white;
+    display: block;
+}
+
+/* Loading */
+.loading {
+    text-align: center;
+    padding: 2rem;
+    color: var(--muted);
+}
+
+/* Empty */
+.empty {
+    text-align: center;
+    padding: 3rem;
+    color: var(--muted);
+}
+
+.empty .icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .stats-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .proxy-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .proxy-actions {
+        margin-top: 1rem;
+        width: 100%;
+    }
+    
+    .proxy-actions .btn {
+        flex: 1;
+    }
+}
+
+/* Proxy Format */
+.proxy-format {
+    margin-top: 0.5rem;
+}
+
+.proxy-format strong {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+}
+
+.proxy-url {
+    margin-top: 0.3rem;
+}
+
+.proxy-box {
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem 0.7rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--accent);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.15s;
+}
+
+.proxy-box:hover {
+    border-color: var(--accent)66;
+    background: var(--accent)08;
+}
+
+.proxy-box .ch {
+    font-size: 0.65rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.proxy-box:hover .ch {
+    color: var(--accent);
+}

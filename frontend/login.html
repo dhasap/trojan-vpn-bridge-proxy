@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Trojan Proxy Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="form-box">
+            <div class="logo-small">&#9889;</div>
+            <h2>Sign In</h2>
+            <div id="error" class="error" style="display:none"></div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+            </form>
+            <p class="text-center">Don't have an account? <a href="/register">Register</a></p>
+        </div>
+    </div>
+    <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('error');
+        errEl.style.display = 'none';
+        
+        const formData = new FormData();
+        formData.append('username', document.getElementById('username').value);
+        formData.append('password', document.getElementById('password').value);
+        
+        try {
+            const res = await fetch('/api/auth/login', { method: 'POST', body: formData, credentials: 'same-origin' });
+            const data = await res.json();
+            if (data.success) {
+                window.location.href = '/dashboard';
+            } else {
+                errEl.textContent = data.detail || 'Login failed';
+                errEl.style.display = 'block';
+            }
+        } catch (err) {
+            errEl.textContent = 'Network error';
+            errEl.style.display = 'block';
+        }
+    });
+    </script>
+</body>
+</html>

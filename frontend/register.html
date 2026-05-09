@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Trojan Proxy Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="form-box">
+            <div class="logo-small">&#9889;</div>
+            <h2>Create Account</h2>
+            <div id="error" class="error" style="display:none"></div>
+            <form id="registerForm">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" required minlength="3">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" required minlength="6">
+                </div>
+                <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+            </form>
+            <p class="text-center">Already have an account? <a href="/login">Sign In</a></p>
+        </div>
+    </div>
+    <script>
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('error');
+        errEl.style.display = 'none';
+        
+        const formData = new FormData();
+        formData.append('username', document.getElementById('username').value);
+        formData.append('password', document.getElementById('password').value);
+        
+        try {
+            const res = await fetch('/api/auth/register', { method: 'POST', body: formData, credentials: 'same-origin' });
+            const data = await res.json();
+            if (data.success) {
+                window.location.href = '/dashboard';
+            } else {
+                errEl.textContent = data.detail || 'Registration failed';
+                errEl.style.display = 'block';
+            }
+        } catch (err) {
+            errEl.textContent = 'Network error';
+            errEl.style.display = 'block';
+        }
+    });
+    </script>
+</body>
+</html>

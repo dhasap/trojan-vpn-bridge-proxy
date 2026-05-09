@@ -1,0 +1,43 @@
+networks:
+  panel-net:
+    driver: bridge
+
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: panel-backend
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - ./data:/app/data
+      - ./xray-configs:/app/xray-configs
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - SECRET_KEY=trojan-panel-secret-key-2026
+      - VPS_IP=8.222.230.139
+      - PORT_START=20000
+      - PORT_END=30000
+      - XRAY_IMAGE=teddysun/xray:latest
+      - XRAY_CONFIGS_HOST=/opt/trojan-panel/xray-configs
+    networks:
+      - panel-net
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: panel-nginx
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - panel-net
+    depends_on:
+      - panel
