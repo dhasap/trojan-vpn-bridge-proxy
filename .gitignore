@@ -16,13 +16,20 @@ build/
 data/
 xray-configs/
 
-# SSL certificates
+# SSL certificates and ACME challenge artifacts
 certs/*.pem
 certs/*.key
 certs/*.crt
+certs/*.bak.*
+certbot-www/
+
+# Private auth files
+nginx/*.htpasswd
 
 # Environment
 .env
+.env.*
+!.env.example
 .env.local
 .env.production
 

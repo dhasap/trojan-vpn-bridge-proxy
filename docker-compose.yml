@@ -1,5 +1,6 @@
 networks:
   panel-net:
+    name: ${PANEL_NETWORK:-vpn-bridge-proxy_panel-net}
     driver: bridge
 
 services:
@@ -16,12 +17,14 @@ services:
       - ./xray-configs:/app/xray-configs
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - SECRET_KEY=trojan-panel-secret-key-2026
-      - VPS_IP=8.222.230.139
-      - PORT_START=20000
-      - PORT_END=30000
-      - XRAY_IMAGE=teddysun/xray:latest
-      - XRAY_CONFIGS_HOST=/opt/trojan-panel/xray-configs
+      - SECRET_KEY=${SECRET_KEY:-change-me-generate-a-long-random-value}
+      - VPS_IP=${VPS_IP:-127.0.0.1}
+      - PORT_START=${PORT_START:-20000}
+      - PORT_END=${PORT_END:-30000}
+      - XRAY_IMAGE=${XRAY_IMAGE:-teddysun/xray:latest}
+      - XRAY_CONFIGS_HOST=${XRAY_CONFIGS_HOST:-/opt/vpn-bridge-proxy/xray-configs}
+      - HOWDY_IMAGE=${HOWDY_IMAGE:-howdy-bridge:latest}
+      - PANEL_NETWORK=${PANEL_NETWORK:-vpn-bridge-proxy_panel-net}
     networks:
       - panel-net
     expose:

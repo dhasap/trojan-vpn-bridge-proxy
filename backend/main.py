@@ -4,7 +4,7 @@ Trojan Proxy Panel - Backend API
 Multi-user proxy management with Docker orchestration
 """
 
-import json, os, hashlib, time, re, sqlite3, subprocess, socket
+import json, os, hashlib, time, re, sqlite3, subprocess, socket, base64, secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -22,11 +22,13 @@ app = FastAPI(title="Trojan Proxy Panel")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "trojan-panel-secret-key-change-me-2026")
 DB_PATH = os.getenv("DB_PATH", "/app/data/panel.db")
-VPS_IP = os.getenv("VPS_IP", "8.222.230.139")
+VPS_IP = os.getenv("VPS_IP", "127.0.0.1")
 PORT_RANGE_START = int(os.getenv("PORT_START", "20000"))
 PORT_RANGE_END = int(os.getenv("PORT_END", "30000"))
 XRAY_IMAGE = os.getenv("XRAY_IMAGE", "teddysun/xray:latest")
-XRAY_CONFIGS_HOST = os.getenv("XRAY_CONFIGS_HOST", "/opt/trojan-panel/xray-configs")
+XRAY_CONFIGS_HOST = os.getenv("XRAY_CONFIGS_HOST", "/opt/vpn-bridge-proxy/xray-configs")
+HOWDY_IMAGE = os.getenv("HOWDY_IMAGE", "howdy-bridge:latest")
+PANEL_NETWORK = os.getenv("PANEL_NETWORK", "vpn-bridge-proxy_panel-net")
 DATA_DIR = "/app/data"
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -75,6 +77,19 @@ def init_db():
             value TEXT
         );
     """)
+    # Lightweight schema migrations for existing installs.
+    proxy_cols = [row[1] for row in conn.execute("PRAGMA table_info(proxies)").fetchall()]
+    for col, ddl in {
+        "proxy_user": "ALTER TABLE proxies ADD COLUMN proxy_user TEXT DEFAULT ''",
+        "proxy_pass": "ALTER TABLE proxies ADD COLUMN proxy_pass TEXT DEFAULT ''",
+        "source_type": "ALTER TABLE proxies ADD COLUMN source_type TEXT DEFAULT 'trojan'",
+        "upstream_username": "ALTER TABLE proxies ADD COLUMN upstream_username TEXT DEFAULT ''",
+        "upstream_password": "ALTER TABLE proxies ADD COLUMN upstream_password TEXT DEFAULT ''",
+        "server_fingerprint": "ALTER TABLE proxies ADD COLUMN server_fingerprint TEXT DEFAULT ''",
+    }.items():
+        if col not in proxy_cols:
+            conn.execute(ddl)
+
     # Create default admin if not exists
     admin = conn.execute("SELECT * FROM users WHERE username='admin'").fetchone()
     if not admin:
@@ -164,7 +179,12 @@ def parse_trojan_url(url: str) -> dict:
         else:
             return result
         
-        # Split host:port?params
+        # Split host:port?params and remove URI fragment (#name)
+        # Trojan share links often append a display name after #. That fragment is
+        # not part of query params; if left in params, parse_qs can put it into
+        # sni/security fields and break TLS SNI.
+        if "#" in rest:
+            rest, _fragment = rest.split("#", 1)
         if "?" in rest:
             host_part, params_part = rest.split("?", 1)
         else:
@@ -193,10 +213,38 @@ def parse_trojan_url(url: str) -> dict:
         # If host is empty, use host from params or sni
         if not result["host"]:
             result["host"] = result["ws_host"] or result["sni"]
+        # Defensive cleanup: SNI must be a hostname, not a display label/comment.
+        if not result["sni"] or result["sni"].startswith("#") or " " in result["sni"]:
+            result["sni"] = result["host"]
         
     except Exception as e:
         print(f"Parse error: {e}")
     
+    return result
+
+def parse_howdy_url(url: str) -> dict:
+    """Parse Howdy.ID share links: howdy://base64({server,sni,username,password,port})."""
+    result = {
+        "server": "",
+        "port": 443,
+        "sni": "",
+        "username": "",
+        "password": "",
+        "protocol": "anyconnect",
+    }
+    if not url.startswith("howdy://"):
+        return result
+    try:
+        raw = url.split("://", 1)[1].strip()
+        raw += "=" * (-len(raw) % 4)
+        data = json.loads(base64.urlsafe_b64decode(raw.encode()).decode())
+        result["server"] = str(data.get("server") or data.get("host") or "").strip()
+        result["port"] = int(data.get("port") or 443)
+        result["sni"] = str(data.get("sni") or "").strip()
+        result["username"] = str(data.get("username") or data.get("user") or "").strip()
+        result["password"] = str(data.get("password") or data.get("pass") or "").strip()
+    except Exception as e:
+        print(f"Howdy parse error: {e}")
     return result
 
 # ─── Port Allocator ───────────────────────────────────────
@@ -222,91 +270,328 @@ def find_available_port() -> int:
 
 # ─── Xray Config Generator ───────────────────────────────
 
-def generate_xray_config(proxy_data: dict) -> dict:
-    """Generate Xray-core config for a Trojan proxy"""
+def build_xray_config(proxy_data: dict, proxy_user: str, proxy_pass: str, loglevel: str = "warning") -> dict:
+    """Generate Xray-core config for a Trojan proxy using supplied client auth."""
     password = proxy_data["trojan_password"]
     host = proxy_data["trojan_host"]
-    port = proxy_data["trojan_port"]
-    sni = proxy_data.get("trojan_sni", host)
-    network = proxy_data.get("network_type", "ws")
-    ws_host = proxy_data.get("ws_host", host)
-    ws_path = proxy_data.get("ws_path", "/")
-    
-    # Generate proxy credentials
-    proxy_user = "proxy"
-    proxy_pass = gen_pass()
-    
-    config = {
-        "log": {
-            "loglevel": "warning"
-        },
-        "inbounds": [
-            {
-                "tag": "socks-in",
-                "port": 1080,
-                "listen": "0.0.0.0",
-                "protocol": "socks",
-                "settings": {
-                    "auth": "password",
-                    "accounts": [
-                        {
-                            "user": proxy_user,
-                            "pass": proxy_pass
-                        }
-                    ],
-                    "udp": True
-                }
-            },
-            {
-                "tag": "http-in",
-                "port": 1081,
-                "listen": "0.0.0.0",
-                "protocol": "http",
-                "settings": {
-                    "accounts": [
-                        {
-                            "user": proxy_user,
-                            "pass": proxy_pass
-                        }
-                    ]
-                }
-            }
-        ],
-        "outbounds": [
-            {
-                "tag": "trojan-out",
-                "protocol": "trojan",
-                "settings": {
-                    "servers": [
-                        {
-                            "address": host,
-                            "port": port,
-                            "password": password
-                        }
-                    ]
-                },
-                "streamSettings": {
-                    "network": network,
-                    "security": "tls",
-                    "tlsSettings": {
-                        "serverName": sni,
-                        "allowInsecure": True
-                    }
-                }
-            }
-        ]
+    port = int(proxy_data.get("trojan_port") or 443)
+    sni = proxy_data.get("trojan_sni") or host
+    network = (proxy_data.get("network_type") or "ws").lower()
+    ws_host = proxy_data.get("ws_host") or host
+    ws_path = proxy_data.get("ws_path") or "/"
+
+    stream_settings = {
+        "network": network,
+        "security": "tls",
+        "tlsSettings": {"serverName": sni, "allowInsecure": True}
     }
-    
-    # Add WebSocket settings if needed
     if network == "ws":
-        config["outbounds"][0]["streamSettings"]["wsSettings"] = {
-            "path": ws_path,
-            "headers": {
-                "Host": ws_host
-            }
+        stream_settings["wsSettings"] = {"path": ws_path, "headers": {"Host": ws_host}}
+    elif network == "grpc":
+        stream_settings["grpcSettings"] = {"serviceName": ws_path.lstrip("/") or "grpc"}
+
+    return {
+        "log": {"loglevel": loglevel},
+        "inbounds": [
+            {"tag": "socks-in", "port": 1080, "listen": "0.0.0.0", "protocol": "socks",
+             "settings": {"auth": "password", "accounts": [{"user": proxy_user, "pass": proxy_pass}], "udp": True}},
+            {"tag": "http-in", "port": 1081, "listen": "0.0.0.0", "protocol": "http",
+             "settings": {"accounts": [{"user": proxy_user, "pass": proxy_pass}]}}
+        ],
+        "outbounds": [{
+            "tag": "trojan-out", "protocol": "trojan",
+            "settings": {"servers": [{"address": host, "port": port, "password": password}]},
+            "streamSettings": stream_settings
+        }]
+    }
+
+def generate_xray_config(proxy_data: dict) -> dict:
+    """Generate Xray-core config for a Trojan proxy and fresh client auth."""
+    proxy_user = proxy_data.get("proxy_user") or "proxy"
+    proxy_pass = proxy_data.get("proxy_pass") or gen_pass()
+    return build_xray_config(proxy_data, proxy_user, proxy_pass), proxy_user, proxy_pass
+
+def _curl_probe(proxy_url: str, timeout: int = 8) -> dict:
+    start_time = time.time()
+    result = subprocess.run([
+        "curl", "-x", proxy_url, "https://api.ipify.org?format=json",
+        "--max-time", str(timeout), "-sS"
+    ], capture_output=True, text=True, timeout=timeout + 4)
+    elapsed = int((time.time() - start_time) * 1000)
+    if result.returncode == 0:
+        try:
+            data = json.loads(result.stdout)
+            if data.get("ip"):
+                return {"success": True, "ip": data["ip"], "ping": elapsed}
+        except Exception:
+            pass
+    return {"success": False, "error": (result.stderr.strip() or result.stdout.strip() or "connection failed"), "exit_code": result.returncode}
+
+def smart_probe_trojan(parsed: dict) -> dict:
+    """Try common Trojan transports before saving. Returns parsed fields updated to a working mode if found."""
+    import uuid, shutil
+    base = {
+        "trojan_password": parsed["password"], "trojan_host": parsed["host"],
+        "trojan_port": int(parsed.get("port") or 443), "trojan_sni": parsed.get("sni") or parsed["host"],
+        "network_type": (parsed.get("network_type") or "ws").lower(),
+        "ws_host": parsed.get("ws_host") or parsed["host"], "ws_path": parsed.get("ws_path") or "/"
+    }
+    candidates = []
+    def add(label, network, sni=None, ws_host=None, ws_path=None):
+        c = dict(base)
+        c["network_type"] = network
+        c["trojan_sni"] = sni if sni is not None else base["trojan_sni"]
+        c["ws_host"] = ws_host if ws_host is not None else base["ws_host"]
+        c["ws_path"] = ws_path if ws_path is not None else base["ws_path"]
+        candidates.append((label, c))
+    claimed = base["network_type"]
+    if claimed == "ws":
+        add("WS as imported", "ws")
+        add("WS no Host header", "ws", ws_host="")
+        add("Trojan TCP+TLS fallback", "tcp")
+        add("Trojan TCP+TLS no SNI", "tcp", sni="")
+    elif claimed == "tcp":
+        add("TCP as imported", "tcp")
+        add("TCP no SNI", "tcp", sni="")
+        add("WS fallback", "ws")
+    else:
+        add(f"{claimed.upper()} as imported", claimed)
+        add("WS fallback", "ws")
+        add("TCP fallback", "tcp")
+
+    probe_user = "proxy"
+    probe_pass = gen_pass()
+    attempts = []
+    probe_id = uuid.uuid4().hex[:10]
+    for idx, (label, proxy_data) in enumerate(candidates):
+        cname = f"xray_probe_{probe_id}_{idx}"
+        config_dir_container = f"/app/xray-configs/_probe_{probe_id}_{idx}"
+        config_dir_host = f"{XRAY_CONFIGS_HOST}/_probe_{probe_id}_{idx}"
+        os.makedirs(config_dir_container, exist_ok=True)
+        config = build_xray_config(proxy_data, probe_user, probe_pass, loglevel="debug")
+        # If ws_host is intentionally empty, omit Host header entirely.
+        if proxy_data.get("network_type") == "ws" and not proxy_data.get("ws_host"):
+            config["outbounds"][0]["streamSettings"]["wsSettings"].pop("headers", None)
+        with open(os.path.join(config_dir_container, "config.json"), "w") as f:
+            json.dump(config, f, indent=2)
+        try:
+            subprocess.run(["docker", "rm", "-f", cname], capture_output=True, timeout=10)
+            run = subprocess.run(["docker", "run", "-d", "--name", cname, "--network", PANEL_NETWORK,
+                                  "-v", f"{config_dir_host}:/etc/xray:ro", XRAY_IMAGE],
+                                 capture_output=True, text=True, timeout=30)
+            if run.returncode != 0:
+                attempts.append({"label": label, "success": False, "error": run.stderr.strip()})
+                continue
+            time.sleep(1)
+            result = _curl_probe(f"socks5h://{probe_user}:{probe_pass}@{cname}:1080")
+            attempts.append({"label": label, "network": proxy_data.get("network_type"), **result})
+            if result.get("success"):
+                parsed["network_type"] = proxy_data["network_type"]
+                parsed["sni"] = proxy_data.get("trojan_sni") or parsed["host"]
+                parsed["ws_host"] = proxy_data.get("ws_host") or ""
+                parsed["ws_path"] = proxy_data.get("ws_path") or ""
+                return {"success": True, "parsed": parsed, "selected": label, "ip": result["ip"], "ping": result["ping"], "attempts": attempts}
+        except Exception as e:
+            attempts.append({"label": label, "success": False, "error": str(e)})
+        finally:
+            subprocess.run(["docker", "rm", "-f", cname], capture_output=True, timeout=10)
+            shutil.rmtree(config_dir_container, ignore_errors=True)
+    return {"success": False, "parsed": parsed, "attempts": attempts, "error": attempts[-1].get("error") if attempts else "No probe attempts"}
+
+# ─── Howdy / OpenConnect Management ───────────────────────
+
+def _docker_openconnect(args: list, password: str = "", timeout: int = 45) -> subprocess.CompletedProcess:
+    """Run openconnect from the howdy-bridge image so the panel container stays lightweight."""
+    cmd = [
+        "docker", "run", "--rm", "-i", "--network", PANEL_NETWORK,
+        "--entrypoint", "openconnect", HOWDY_IMAGE,
+    ] + args
+    return subprocess.run(cmd, input=password, capture_output=True, text=True, timeout=timeout)
+
+def probe_howdy_fingerprint(server: str, port: int = 443, sni: str = "") -> str:
+    """Return openconnect pin-sha256 fingerprint for an AnyConnect/ocserv server."""
+    hostport = f"{server}:{int(port or 443)}"
+    args = [
+        "--protocol=anyconnect", "--authenticate",
+        "--servercert", "pin-sha256:invalid", "--user", "probe",
+        "--passwd-on-stdin", "--server", hostport
+    ]
+    try:
+        result = _docker_openconnect(args, password="probe\n", timeout=35)
+        text = result.stdout + "\n" + result.stderr
+        m = re.search(r"pin-sha256:[A-Za-z0-9+/=]+", text)
+        return m.group(0) if m else ""
+    except Exception as e:
+        print(f"Howdy fingerprint probe failed: {e}")
+        return ""
+
+def check_howdy_auth(parsed: dict) -> dict:
+    """Authenticate only to confirm protocol and collect server evidence."""
+    server = parsed.get("server") or parsed.get("host")
+    port = int(parsed.get("port") or 443)
+    user = parsed.get("username") or ""
+    password = parsed.get("password") or ""
+    fp = parsed.get("fingerprint") or probe_howdy_fingerprint(server, port, parsed.get("sni") or server)
+    if not fp:
+        return {"success": False, "error": "Could not read server certificate fingerprint"}
+    args = [
+        "--protocol=anyconnect", "--user", user,
+        "--passwd-on-stdin", "--authenticate", "--server", f"{server}:{port}",
+        "--servercert", fp
+    ]
+    try:
+        result = _docker_openconnect(args, password=f"{password}\n", timeout=60)
+        text = result.stdout + "\n" + result.stderr
+        ok = result.returncode == 0 and ("COOKIE=" in text or "CONNECT_URL=" in text or "HOST=" in text)
+        evidence = {}
+        m = re.search(r"X-CSTP-Server-Name:\s*([^\r\n]+)", text)
+        if m: evidence["server_name"] = m.group(1).strip()
+        m = re.search(r"X-CSTP-Banner:\s*([^\r\n]+)", text)
+        if m: evidence["banner"] = m.group(1).strip()
+        m = re.search(r"HOST='([^']+)'", text)
+        if m: evidence["host_ip"] = m.group(1).strip()
+        return {"success": ok, "fingerprint": fp, "protocol": "anyconnect", "evidence": evidence,
+                "error": "" if ok else (text.strip()[-800:] or "authentication failed")}
+    except Exception as e:
+        return {"success": False, "fingerprint": fp, "error": str(e)}
+
+def create_howdy_proxy(proxy_id: int):
+    """Create a public authenticated SOCKS5 Xray wrapper in front of a Howdy ocproxy container."""
+    conn = get_db()
+    proxy = conn.execute("SELECT * FROM proxies WHERE id=?", (proxy_id,)).fetchone()
+    if not proxy:
+        conn.close()
+        raise HTTPException(404, "Proxy not found")
+    proxy_data = dict(proxy)
+    local_port = int(proxy_data["local_port"])
+    bridge_name = f"howdy_bridge_{proxy_data['user_id']}_{proxy_id}"
+    wrapper_name = f"proxy_{proxy_data['user_id']}_{proxy_id}"
+    proxy_user = proxy_data.get("proxy_user") or "proxy"
+    proxy_pass = proxy_data.get("proxy_pass") or gen_pass()
+    upstream_host = proxy_data.get("trojan_host")
+    upstream_port = int(proxy_data.get("trojan_port") or 443)
+    upstream_user = proxy_data.get("upstream_username") or ""
+    upstream_pass = proxy_data.get("upstream_password") or proxy_data.get("trojan_password") or ""
+    fingerprint = proxy_data.get("server_fingerprint") or ""
+    if not fingerprint:
+        fingerprint = probe_howdy_fingerprint(upstream_host, upstream_port, proxy_data.get("trojan_sni") or upstream_host)
+
+    # Remove stale containers first.
+    subprocess.run(["docker", "rm", "-f", wrapper_name], capture_output=True, timeout=20)
+    subprocess.run(["docker", "rm", "-f", bridge_name], capture_output=True, timeout=20)
+
+    bridge_cmd = [
+        "docker", "run", "-d", "--name", bridge_name, "--restart", "unless-stopped",
+        "--network", PANEL_NETWORK,
+        "-e", f"HOWDY_SERVER={upstream_host}:{upstream_port}",
+        "-e", f"HOWDY_USER={upstream_user}",
+        "-e", f"HOWDY_PASS={upstream_pass}",
+        "-e", "HOWDY_SOCKS_PORT=1080",
+    ]
+    if fingerprint:
+        bridge_cmd += ["-e", f"HOWDY_FINGERPRINT={fingerprint}"]
+    bridge_cmd.append(HOWDY_IMAGE)
+
+    try:
+        run_bridge = subprocess.run(bridge_cmd, capture_output=True, text=True, timeout=40)
+        if run_bridge.returncode != 0:
+            conn.execute("UPDATE proxies SET status='ERROR' WHERE id=?", (proxy_id,))
+            conn.commit(); conn.close()
+            print(f"Howdy bridge error: {run_bridge.stderr}")
+            return
+
+        # Wait until ocproxy listens inside the bridge container.
+        ready = False
+        for _ in range(25):
+            probe = subprocess.run([
+                "docker", "exec", bridge_name, "sh", "-c",
+                "(ss -tln 2>/dev/null || netstat -tln 2>/dev/null || true) | grep -q ':1080'"
+            ], capture_output=True, text=True, timeout=5)
+            if probe.returncode == 0:
+                ready = True
+                break
+            time.sleep(1)
+        if not ready:
+            logs = subprocess.run(["docker", "logs", bridge_name, "--tail", "80"], capture_output=True, text=True, timeout=10)
+            subprocess.run(["docker", "rm", "-f", bridge_name], capture_output=True, timeout=20)
+            conn.execute("UPDATE proxies SET status='ERROR' WHERE id=?", (proxy_id,))
+            conn.commit(); conn.close()
+            print(f"Howdy bridge not ready: {logs.stdout[-1000:]} {logs.stderr[-1000:]}")
+            return
+
+        wrapper_config = {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{
+                "tag": "socks-in", "port": 1080, "listen": "0.0.0.0", "protocol": "socks",
+                "settings": {"auth": "password", "accounts": [{"user": proxy_user, "pass": proxy_pass}], "udp": True}
+            }],
+            "outbounds": [{
+                "tag": "to-howdy", "protocol": "socks",
+                "settings": {"servers": [{"address": bridge_name, "port": 1080}]}
+            }]
         }
-    
-    return config, proxy_user, proxy_pass
+        config_dir_container = f"/app/xray-configs/proxy_{proxy_id}"
+        config_dir_host = f"{XRAY_CONFIGS_HOST}/proxy_{proxy_id}"
+        os.makedirs(config_dir_container, exist_ok=True)
+        with open(os.path.join(config_dir_container, "config.json"), "w") as f:
+            json.dump(wrapper_config, f, indent=2)
+
+        wrapper_cmd = [
+            "docker", "run", "-d", "--name", wrapper_name, "--restart", "unless-stopped",
+            "--network", PANEL_NETWORK,
+            "-p", f"0.0.0.0:{local_port}:1080",
+            "-v", f"{config_dir_host}:/etc/xray:ro",
+            XRAY_IMAGE
+        ]
+        run_wrapper = subprocess.run(wrapper_cmd, capture_output=True, text=True, timeout=30)
+        if run_wrapper.returncode == 0:
+            conn.execute("""
+                UPDATE proxies SET status='RUNNING', container_name=?, proxy_user=?, proxy_pass=?, server_fingerprint=?
+                WHERE id=?
+            """, (wrapper_name, proxy_user, proxy_pass, fingerprint, proxy_id))
+        else:
+            subprocess.run(["docker", "rm", "-f", bridge_name], capture_output=True, timeout=20)
+            conn.execute("UPDATE proxies SET status='ERROR' WHERE id=?", (proxy_id,))
+            print(f"Howdy wrapper error: {run_wrapper.stderr}")
+    except Exception as e:
+        subprocess.run(["docker", "rm", "-f", wrapper_name], capture_output=True, timeout=20)
+        subprocess.run(["docker", "rm", "-f", bridge_name], capture_output=True, timeout=20)
+        conn.execute("UPDATE proxies SET status='ERROR' WHERE id=?", (proxy_id,))
+        print(f"Howdy create exception: {e}")
+    conn.commit()
+    conn.close()
+
+def stop_howdy_proxy(proxy_id: int):
+    conn = get_db()
+    proxy = conn.execute("SELECT * FROM proxies WHERE id=?", (proxy_id,)).fetchone()
+    if not proxy:
+        conn.close(); return
+    bridge_name = f"howdy_bridge_{proxy['user_id']}_{proxy_id}"
+    wrapper_name = proxy["container_name"] or f"proxy_{proxy['user_id']}_{proxy_id}"
+    subprocess.run(["docker", "stop", wrapper_name], capture_output=True, timeout=15)
+    subprocess.run(["docker", "stop", bridge_name], capture_output=True, timeout=15)
+    conn.execute("UPDATE proxies SET status='PAUSED' WHERE id=?", (proxy_id,))
+    conn.commit(); conn.close()
+
+def start_howdy_proxy(proxy_id: int):
+    # Recreate both containers to refresh AnyConnect login cookies cleanly.
+    create_howdy_proxy(proxy_id)
+
+def delete_howdy_proxy(proxy_id: int):
+    conn = get_db()
+    proxy = conn.execute("SELECT * FROM proxies WHERE id=?", (proxy_id,)).fetchone()
+    if not proxy:
+        conn.close(); return
+    bridge_name = f"howdy_bridge_{proxy['user_id']}_{proxy_id}"
+    wrapper_name = proxy["container_name"] or f"proxy_{proxy['user_id']}_{proxy_id}"
+    subprocess.run(["docker", "rm", "-f", wrapper_name], capture_output=True, timeout=20)
+    subprocess.run(["docker", "rm", "-f", bridge_name], capture_output=True, timeout=20)
+    config_dir = f"/app/xray-configs/proxy_{proxy_id}"
+    if os.path.exists(config_dir):
+        import shutil
+        shutil.rmtree(config_dir, ignore_errors=True)
+    conn.execute("DELETE FROM proxies WHERE id=?", (proxy_id,))
+    conn.commit(); conn.close()
 
 # ─── Docker Management ────────────────────────────────────
 
@@ -318,6 +603,11 @@ def create_proxy_container(proxy_id: int):
         conn.close()
         raise HTTPException(404, "Proxy not found")
     
+    if (proxy["source_type"] or "trojan") == "howdy":
+        conn.close()
+        create_howdy_proxy(proxy_id)
+        return
+
     # Generate config with credentials
     proxy_data = dict(proxy)
     config, proxy_user, proxy_pass = generate_xray_config(proxy_data)
@@ -339,7 +629,7 @@ def create_proxy_container(proxy_id: int):
         "docker", "run", "-d",
         "--name", container_name,
         "--restart", "unless-stopped",
-        "--network", "trojan-panel_panel-net",
+        "--network", PANEL_NETWORK,
         "-p", f"0.0.0.0:{local_port}:1080",
         "-v", f"{config_dir_host}:/etc/xray:ro",
         XRAY_IMAGE
@@ -367,7 +657,14 @@ def stop_proxy_container(proxy_id: int):
     """Stop a proxy container"""
     conn = get_db()
     proxy = conn.execute("SELECT * FROM proxies WHERE id=?", (proxy_id,)).fetchone()
-    if not proxy or not proxy["container_name"]:
+    if not proxy:
+        conn.close()
+        return
+    if (proxy["source_type"] or "trojan") == "howdy":
+        conn.close()
+        stop_howdy_proxy(proxy_id)
+        return
+    if not proxy["container_name"]:
         conn.close()
         return
     
@@ -387,6 +684,10 @@ def start_proxy_container(proxy_id: int):
     proxy = conn.execute("SELECT * FROM proxies WHERE id=?", (proxy_id,)).fetchone()
     if not proxy:
         conn.close()
+        return
+    if (proxy["source_type"] or "trojan") == "howdy":
+        conn.close()
+        start_howdy_proxy(proxy_id)
         return
     
     if not proxy["container_name"]:
@@ -415,6 +716,10 @@ def delete_proxy_container(proxy_id: int):
     if not proxy:
         conn.close()
         return
+    if (proxy["source_type"] or "trojan") == "howdy":
+        conn.close()
+        delete_howdy_proxy(proxy_id)
+        return
     
     # Stop and remove container
     if proxy["container_name"]:
@@ -441,20 +746,27 @@ def sync_all_containers():
     proxies = conn.execute("SELECT * FROM proxies").fetchall()
     
     for proxy in proxies:
-        if proxy["container_name"]:
+        source_type = proxy["source_type"] or "trojan"
+        if source_type == "howdy":
+            bridge_name = f"howdy_bridge_{proxy['user_id']}_{proxy['id']}"
+            wrapper_name = proxy["container_name"] or f"proxy_{proxy['user_id']}_{proxy['id']}"
+            wrapper = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", wrapper_name], capture_output=True, text=True, timeout=5)
+            bridge = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", bridge_name], capture_output=True, text=True, timeout=5)
+            if wrapper.returncode == 0 and "true" in wrapper.stdout and bridge.returncode == 0 and "true" in bridge.stdout:
+                conn.execute("UPDATE proxies SET status='RUNNING', container_name=? WHERE id=?", (wrapper_name, proxy["id"]))
+            else:
+                conn.execute("UPDATE proxies SET status='PAUSED' WHERE id=?", (proxy["id"],))
+        elif proxy["container_name"]:
             # Check if container exists and is running
             result = subprocess.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}", proxy["container_name"]],
                 capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0 and "true" in result.stdout:
-                # Container exists and is running
                 conn.execute("UPDATE proxies SET status='RUNNING' WHERE id=?", (proxy["id"],))
             else:
-                # Container doesn't exist or not running
                 conn.execute("UPDATE proxies SET status='PAUSED' WHERE id=?", (proxy["id"],))
         else:
-            # No container name - mark as stopped
             conn.execute("UPDATE proxies SET status='STOPPED' WHERE id=?", (proxy["id"],))
     
     conn.commit()
@@ -482,6 +794,7 @@ def test_proxy(proxy_id: int) -> dict:
         # Use container name with auth for Docker network access
         proxy_user = proxy["proxy_user"] or "proxy"
         proxy_pass = proxy["proxy_pass"] or ""
+        source_type = proxy["source_type"] or "trojan"
         
         if proxy_pass:
             proxy_url = f"socks5h://{proxy_user}:{proxy_pass}@{container_name}:1080"
@@ -490,8 +803,8 @@ def test_proxy(proxy_id: int) -> dict:
         
         result = subprocess.run([
             "curl", "-x", proxy_url,
-            "https://httpbin.org/ip", "--max-time", "10", "-s"
-        ], capture_output=True, text=True, timeout=15)
+            "https://httpbin.org/ip", "--max-time", "15", "-s"
+        ], capture_output=True, text=True, timeout=20)
         
         elapsed = int((time.time() - start_time) * 1000)
         
@@ -509,8 +822,23 @@ def test_proxy(proxy_id: int) -> dict:
             
             return {"success": True, "ip": ip, "ping": elapsed}
         else:
-            return {"success": False, "error": result.stderr or "Connection failed"}
+            error = result.stderr.strip() or result.stdout.strip() or "Connection failed"
+            conn = get_db()
+            conn.execute("""
+                UPDATE proxies SET last_test_ip='', last_test_ping=0, last_test_time=CURRENT_TIMESTAMP
+                WHERE id=?
+            """, (proxy_id,))
+            conn.commit()
+            conn.close()
+            return {"success": False, "error": error, "exit_code": result.returncode}
     except Exception as e:
+        conn = get_db()
+        conn.execute("""
+            UPDATE proxies SET last_test_ip='', last_test_ping=0, last_test_time=CURRENT_TIMESTAMP
+            WHERE id=?
+        """, (proxy_id,))
+        conn.commit()
+        conn.close()
         return {"success": False, "error": str(e)}
 
 # ─── API Routes ───────────────────────────────────────────
@@ -587,8 +915,43 @@ async def create_proxy(request: Request):
     raw_url = data.get("raw_url", "").strip()
     name = data.get("name", "").strip()
     
+    source_type = (data.get("source_type") or "").strip().lower()
+    if raw_url.startswith("howdy://"):
+        source_type = "howdy"
+    elif not source_type:
+        source_type = "trojan"
+
     # Parse URL if provided
-    if raw_url:
+    howdy_probe = None
+    if source_type == "howdy":
+        if raw_url:
+            h = parse_howdy_url(raw_url)
+        else:
+            h = {
+                "server": data.get("server") or data.get("host") or "",
+                "port": int(data.get("port", 443)),
+                "sni": data.get("sni", ""),
+                "username": data.get("username", ""),
+                "password": data.get("password", ""),
+            }
+        if not h.get("server") or not h.get("username") or not h.get("password"):
+            raise HTTPException(400, "Invalid Howdy URL/config")
+        parsed = {
+            "password": h["password"],
+            "host": h["server"],
+            "port": int(h.get("port") or 443),
+            "sni": h.get("sni") or h["server"],
+            "network_type": "anyconnect",
+            "ws_host": "",
+            "ws_path": "/",
+            "upstream_username": h["username"],
+            "upstream_password": h["password"],
+        }
+        if data.get("smart", True):
+            howdy_probe = check_howdy_auth({**h, "fingerprint": data.get("server_fingerprint", "")})
+            if howdy_probe.get("fingerprint"):
+                parsed["server_fingerprint"] = howdy_probe["fingerprint"]
+    elif raw_url:
         parsed = parse_trojan_url(raw_url)
         if not parsed["password"] or not parsed["host"]:
             raise HTTPException(400, "Invalid Trojan URL")
@@ -608,10 +971,24 @@ async def create_proxy(request: Request):
     
     if not parsed["sni"]:
         parsed["sni"] = parsed["host"]
-    if not parsed["ws_host"]:
+    if not parsed["ws_host"] and (parsed.get("network_type") or "ws") == "ws":
         parsed["ws_host"] = parsed["host"]
+
+    # Smart import: probe common Trojan transport variants before saving.
+    # This catches links that claim WS but actually work as TCP+TLS, bad Host headers,
+    # and dead/invalid upstream accounts. Set smart=false in JSON to skip.
+    smart_result = None
+    if source_type == "trojan" and data.get("smart", True):
+        smart_result = smart_probe_trojan(parsed.copy())
+        if smart_result.get("success"):
+            parsed = smart_result["parsed"]
+
     if not name:
-        name = f"{parsed['host']}:{parsed['port']}"
+        if source_type == "howdy":
+            name = f"Howdy {parsed['host']}:{parsed['port']}"
+        else:
+            suffix = f" {parsed.get('network_type', 'ws').upper()}" if smart_result and smart_result.get("success") else ""
+            name = f"{parsed['host']}:{parsed['port']}{suffix}"
     
     # Allocate port
     local_port = find_available_port()
@@ -619,17 +996,37 @@ async def create_proxy(request: Request):
     conn = get_db()
     cursor = conn.execute("""
         INSERT INTO proxies (user_id, name, trojan_raw_url, trojan_password, trojan_host, 
-                           trojan_port, trojan_sni, network_type, ws_host, ws_path, local_port, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STOPPED')
+                           trojan_port, trojan_sni, network_type, ws_host, ws_path, local_port, status,
+                           source_type, upstream_username, upstream_password, server_fingerprint)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STOPPED', ?, ?, ?, ?)
     """, (user["user_id"], name, raw_url, parsed["password"], parsed["host"],
           parsed["port"], parsed["sni"], parsed["network_type"], 
-          parsed["ws_host"], parsed["ws_path"], local_port))
+          parsed["ws_host"], parsed["ws_path"], local_port, source_type,
+          parsed.get("upstream_username", ""), parsed.get("upstream_password", ""), parsed.get("server_fingerprint", "")))
     
     proxy_id = cursor.lastrowid
     conn.commit()
     conn.close()
     
-    return {"success": True, "proxy_id": proxy_id, "local_port": local_port}
+    response = {"success": True, "proxy_id": proxy_id, "local_port": local_port}
+    if smart_result:
+        response["smart"] = {
+            "success": smart_result.get("success", False),
+            "selected": smart_result.get("selected"),
+            "ip": smart_result.get("ip"),
+            "ping": smart_result.get("ping"),
+            "error": smart_result.get("error"),
+            "attempts": smart_result.get("attempts", [])
+        }
+    if howdy_probe:
+        response["howdy"] = {
+            "success": howdy_probe.get("success", False),
+            "protocol": howdy_probe.get("protocol", "anyconnect"),
+            "fingerprint": howdy_probe.get("fingerprint"),
+            "evidence": howdy_probe.get("evidence", {}),
+            "error": howdy_probe.get("error"),
+        }
+    return response
 
 @app.post("/api/proxies/{proxy_id}/start")
 async def start_proxy(request: Request, proxy_id: int):
@@ -661,7 +1058,7 @@ async def start_proxy(request: Request, proxy_id: int):
         "success": True, 
         "status": "RUNNING",
         "proxy_format": proxy_format,
-        "proxy_url": f"socks5://{proxy['proxy_user']}:{proxy['proxy_pass']}@{VPS_IP}:{proxy['local_port']}"
+        "proxy_url": f"socks5h://{proxy['proxy_user']}:{proxy['proxy_pass']}@{VPS_IP}:{proxy['local_port']}"
     }
 
 @app.post("/api/proxies/{proxy_id}/stop")
@@ -801,3 +1198,5 @@ async def startup():
 # Mount static files and templates
 templates = Jinja2Templates(directory="/app/frontend")
 app.mount("/static", StaticFiles(directory="/app/frontend/static"), name="static")
+
+

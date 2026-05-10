@@ -3,70 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Trojan Proxy Panel</title>
+    <title>Dashboard - Bridge Proxy Panel</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body>
-    <nav class="navbar">
-        <div class="nav-brand">Trojan Proxy Panel</div>
+<body class="dashboard-body">
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+
+    <nav class="navbar glass">
+        <div class="nav-brand">
+            <span class="brand-mark">TB</span>
+            <span>
+                <strong>Bridge Proxy Panel</strong>
+                <small>Trojan & Howdy SOCKS5 manager</small>
+            </span>
+        </div>
         <div class="nav-links">
-            <a href="#" onclick="showSection('proxies')" class="active" id="nav-proxies">Proxies</a>
-            <a href="#" onclick="showSection('add')" id="nav-add">Add Proxy</a>
+            <a href="#" onclick="showSection('proxies')" class="active" id="nav-proxies">Dashboard</a>
+            <a href="#" onclick="showSection('add')" id="nav-add">Add Source</a>
+            <a href="#" onclick="loadAll()">Refresh</a>
             <a href="#" onclick="logout()" class="btn-logout">Logout</a>
         </div>
     </nav>
 
-    <div class="main">
-        <!-- Stats -->
-        <div class="stats-row" id="statsRow">
-            <div class="stat-card">
+    <main class="main">
+        <section class="hero-panel glass">
+            <div>
+                <p class="eyebrow">Live bridge status</p>
+                <h1>Proxy operations cockpit</h1>
+                <p class="hero-copy">Convert Trojan links and Howdy/OpenConnect VPN accounts into authenticated public SOCKS5 proxies. Copy format: host:port:user:pass.</p>
+            </div>
+            <div class="hero-actions">
+                <button class="btn btn-primary" onclick="showSection('add')">Add Proxy Source</button>
+                <button class="btn btn-secondary" onclick="loadAll()">Run Refresh</button>
+            </div>
+        </section>
+
+        <section class="stats-row" id="statsRow">
+            <div class="stat-card glass accent-cyan">
+                <div class="stat-kicker">Inventory</div>
                 <div class="stat-value" id="statProxies">0</div>
                 <div class="stat-label">Total Proxies</div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card glass accent-green">
+                <div class="stat-kicker">Availability</div>
                 <div class="stat-value" id="statRunning">0</div>
                 <div class="stat-label">Running</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value" id="statIP">-</div>
+            <div class="stat-card glass accent-purple">
+                <div class="stat-kicker">Gateway</div>
+                <div class="stat-value small" id="statIP">-</div>
                 <div class="stat-label">VPS IP</div>
             </div>
-        </div>
+            <div class="stat-card glass accent-amber">
+                <div class="stat-kicker">Quality</div>
+                <div class="stat-value small" id="statHealth">-</div>
+                <div class="stat-label">Last Test Health</div>
+            </div>
+        </section>
 
-        <!-- Proxies Section -->
-        <div id="section-proxies" class="section">
+        <section id="section-proxies" class="section glass">
             <div class="section-header">
-                <h2>My Proxies</h2>
-                <button class="btn btn-primary" onclick="showSection('add')">+ Add Proxy</button>
+                <div>
+                    <p class="eyebrow">Proxy list</p>
+                    <h2>Managed bridges</h2>
+                </div>
+                <div class="section-tools">
+                    <input id="proxyFilter" class="filter-input" placeholder="Filter host, name, port..." oninput="renderProxies()">
+                    <button class="btn btn-primary" onclick="showSection('add')">+ Add Proxy</button>
+                </div>
             </div>
             <div id="proxyList" class="proxy-list">
                 <div class="loading">Loading...</div>
             </div>
-        </div>
+        </section>
 
-        <!-- Add Proxy Section -->
-        <div id="section-add" class="section" style="display:none">
-            <h2>Add New Proxy</h2>
-            
+        <section id="section-add" class="section glass" style="display:none">
+            <div class="section-header">
+                <div>
+                    <p class="eyebrow">Provision</p>
+                    <h2>Add new proxy source</h2>
+                </div>
+            </div>
+            <div class="info-banner">
+                Smart import supports Trojan and Howdy links. Trojan links are probed across WS/TCP variants; Howdy links are detected as AnyConnect/OpenConnect VPN and bridged into an authenticated SOCKS5 proxy.
+            </div>
             <div class="tabs">
-                <button class="tab active" onclick="showTab('url')">Paste URL</button>
-                <button class="tab" onclick="showTab('manual')">Manual Input</button>
+                <button class="tab active" onclick="showTab('url', event)">Paste URL</button>
+                <button class="tab" onclick="showTab('manual', event)">Manual Trojan</button>
+                <button class="tab" onclick="showTab('howdy', event)">Manual Howdy</button>
             </div>
 
-            <!-- URL Tab -->
             <div id="tab-url" class="tab-content">
                 <div class="form-group">
-                    <label>Trojan URL</label>
-                    <input type="text" id="trojanUrl" placeholder="trojan://password@host:port/?sni=xxx&type=ws&host=xxx&path=/howdy">
+                    <label>Proxy URL</label>
+                    <textarea id="trojanUrl" rows="4" placeholder="trojan://password@host:443?... or howdy://base64config"></textarea>
+                    <small class="field-help">Paste one Trojan or Howdy share link. Smart import may take 10-40s while probing the upstream.</small>
                 </div>
                 <div class="form-group">
                     <label>Name (optional)</label>
-                    <input type="text" id="urlName" placeholder="My Proxy">
+                    <input type="text" id="urlName" placeholder="Asia WS / US node / backup tunnel">
                 </div>
-                <button class="btn btn-primary" onclick="addFromUrl()">Add Proxy</button>
+                <div class="form-group compact-check">
+                    <label><input type="checkbox" id="smartUrl" checked> Smart probe transport before saving</label>
+                </div>
+                <button class="btn btn-primary" onclick="addFromUrl()">Smart Add Proxy</button>
             </div>
 
-            <!-- Manual Tab -->
             <div id="tab-manual" class="tab-content" style="display:none">
                 <div class="form-row">
                     <div class="form-group">
@@ -106,14 +149,52 @@
                     <label>Name (optional)</label>
                     <input type="text" id="manualName" placeholder="My Proxy">
                 </div>
-                <button class="btn btn-primary" onclick="addManual()">Add Proxy</button>
+                <div class="form-group compact-check">
+                    <label><input type="checkbox" id="smartManual" checked> Smart probe and auto-correct WS/TCP mode</label>
+                </div>
+                <button class="btn btn-primary" onclick="addManual()">Smart Add Trojan Proxy</button>
             </div>
-        </div>
-    </div>
 
-    <!-- Toast -->
+            <div id="tab-howdy" class="tab-content" style="display:none">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Server</label>
+                        <input type="text" id="howdyServer" placeholder="vpn.example.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Port</label>
+                        <input type="number" id="howdyPort" value="443">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="howdyUsername" placeholder="howdy_user" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="text" id="howdyPassword" placeholder="account password" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>SNI / TLS Host (optional)</label>
+                        <input type="text" id="howdySni" placeholder="same as server">
+                    </div>
+                    <div class="form-group">
+                        <label>Name (optional)</label>
+                        <input type="text" id="howdyName" placeholder="AnyConnect node">
+                    </div>
+                </div>
+                <div class="form-group compact-check">
+                    <label><input type="checkbox" id="smartHowdy" checked> Verify Howdy/OpenConnect login before saving</label>
+                </div>
+                <button class="btn btn-primary" onclick="addHowdyManual()">Smart Add Howdy Proxy</button>
+            </div>
+        </section>
+    </main>
+
     <div id="toast" class="toast"></div>
-
     <script src="/static/js/app.js"></script>
 </body>
 </html>

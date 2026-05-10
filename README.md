@@ -1,12 +1,14 @@
-# Trojan VPN Bridge Proxy
+# VPN Bridge Proxy
 
-Convert Trojan VPN connections to standard SOCKS5/HTTP proxy with web management panel.
+Convert Trojan links and Howdy/OpenConnect VPN accounts into authenticated public SOCKS5/HTTP proxies with a web management panel.
 
 ## Features
 
 - **Multi-user Support** - Each user has their own proxy accounts
 - **JWT Authentication** - Secure login with session tokens
 - **Trojan URL Parser** - Automatically parse Trojan URLs
+- **Smart Transport Probe** - Try common WS/TCP/gRPC variants and save the working mode
+- **Howdy/OpenConnect Bridge** - Bridge AnyConnect/OpenConnect VPN accounts to SOCKS5 using ocproxy
 - **Manual Configuration** - Input proxy details manually
 - **Docker Isolation** - Each proxy runs in its own container
 - **Port Allocation** - Automatic port assignment (20000-30000)
@@ -44,20 +46,27 @@ Convert Trojan VPN connections to standard SOCKS5/HTTP proxy with web management
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/dhasap/trojan-vpn-bridge-proxy.git
-cd trojan-vpn-bridge-proxy
+git clone https://github.com/dhasap/vpn-bridge-proxy.git
+cd vpn-bridge-proxy
 ```
 
 ### 2. Configure Environment
 
-Edit `docker-compose.yml`:
+Copy `.env.example` to `.env`, then set your own values:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
 
 ```yaml
-environment:
-  - SECRET_KEY=your-secret-key-here
-  - VPS_IP=your-vps-ip
-  - PORT_START=20000
-  - PORT_END=30000
+SECRET_KEY=your-secret-key-here
+VPS_IP=your-vps-ip
+PORT_START=20000
+PORT_END=30000
+XRAY_CONFIGS_HOST=/opt/vpn-bridge-proxy/xray-configs
+PANEL_NETWORK=vpn-bridge-proxy_panel-net
 ```
 
 ### 3. Add SSL Certificates
@@ -82,6 +91,12 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
 
 ```bash
 docker compose up -d
+```
+
+If you plan to use Howdy/OpenConnect sources, build the bridge image first:
+
+```bash
+docker build -t howdy-bridge:latest ./howdy-image
 ```
 
 ### 5. Access Panel
@@ -134,27 +149,27 @@ After starting, you get:
 
 ```
 Format: IP:PORT:USER:PASSWORD
-Example: 8.222.230.139:20002:proxy:abc123def456
+Example: 203.0.113.10:20002:proxy:abc123def456
 
 SOCKS5 URL: socks5://USER:PASSWORD@IP:PORT
-Example: socks5://proxy:abc123def456@8.222.230.139:20002
+Example: socks5://proxy:abc123def456@203.0.113.10:20002
 
-HTTP Proxy: http://USER:PASSWORD@IP:PORT
-Example: http://proxy:abc123def456@8.222.230.139:20002
+HTTP Proxy: http://USER:***@IP:PORT
+Example: http://proxy:***@203.0.113.10:20002
 ```
 
 ### Using Proxy from Other VPS
 
 ```bash
 # Using curl
-curl -x socks5://proxy:abc123def456@8.222.230.139:20002 https://httpbin.org/ip
+curl -x socks5://proxy:abc123def456@203.0.113.10:20002 https://httpbin.org/ip
 
 # Using wget
-wget -e use_proxy=yes -e http_proxy=socks5://proxy:abc123def456@8.222.230.139:20002 https://httpbin.org/ip
+wget -e use_proxy=yes -e http_proxy=socks5://proxy:abc123def456@203.0.113.10:20002 https://httpbin.org/ip
 
 # In Python
 import requests
-proxies = {'http': 'socks5://proxy:abc123def456@8.222.230.139:20002'}
+proxies = {'http': 'socks5://proxy:abc123def456@203.0.113.10:20002'}
 r = requests.get('https://httpbin.org/ip', proxies=proxies)
 ```
 
@@ -193,9 +208,9 @@ r = requests.get('https://httpbin.org/ip', proxies=proxies)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| SECRET_KEY | trojan-panel-secret-key-2026 | JWT secret key |
+| SECRET_KEY | change-me-generate-a-long-random-value | JWT secret key |
 | DB_PATH | /app/data/panel.db | SQLite database path |
-| VPS_IP | 8.222.230.139 | VPS public IP |
+| VPS_IP | 203.0.113.10 | VPS public IP |
 | PORT_START | 20000 | Port range start |
 | PORT_END | 30000 | Port range end |
 | XRAY_IMAGE | teddysun/xray:latest | Xray Docker image |
@@ -311,7 +326,7 @@ SELECT * FROM proxies;
 ### Project Structure
 
 ```
-trojan-vpn-bridge-proxy/
+vpn-bridge-proxy/
 ├── backend/
 │   ├── main.py          # FastAPI application
 │   └── requirements.txt # Python dependencies
